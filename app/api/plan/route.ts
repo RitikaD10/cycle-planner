@@ -85,12 +85,18 @@ Create a realistic plan for TODAY with:
 4) A 5-minute mindset practice
 5) Safety notes
 `;
-
+if (prompt.length > 2000) {
+  return Response.json(
+    { error: "Input too long. Please shorten your notes." },
+    { status: 400 }
+  );
+}
     // ✅ Force the model to return *only JSON* that matches our schema
     const response = await openai.responses.create({
       model: "gpt-4.1-mini",
+      max_output_tokens: 600,
       input: [
-        { role: "system", content: "Return ONLY JSON. No markdown. No extra text." },
+        { role: "system", content: "Return ONLY JSON matching the schema. No markdown. Keep arrays short: warmup<=2, mainSet<=3, cooldown<=2, meals<=3, hydration<=3, practices<=2, fiveMinutePractice<=2, safetyNotes<=3." },
         { role: "user", content: prompt },
       ],
       text: {
@@ -170,8 +176,38 @@ Create a realistic plan for TODAY with:
       },
     });
 
-    const data = JSON.parse(response.output_text) as Plan;
-    return Response.json(data);
+    // Prefer the SDK convenience string; it’s fine for v0 as long as we guard it.
+const raw = response.output_text;
+
+if (!raw) {
+  console.error("No output_text in response:", response);
+  return Response.json({ error: "No model output" }, { status: 500 });
+}
+
+let data: Plan;
+
+try {
+  data = JSON.parse(raw) as Plan;
+} catch (e) {
+  // Fallback: sometimes the model returns extra characters.
+  // Extract the first JSON object and try again.
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) {
+    console.error("Model returned non-JSON text:", raw);
+    return Response.json({ error: "Model returned invalid JSON" }, { status: 500 });
+  }
+
+  const sliced = raw.slice(start, end + 1);
+  try {
+    data = JSON.parse(sliced) as Plan;
+  } catch (e2) {
+    console.error("Invalid JSON after slicing:", sliced);
+    return Response.json({ error: "Model returned invalid JSON" }, { status: 500 });
+  }
+}
+
+return Response.json(data);
   } catch (error: any) {
     console.error("API /plan error:", error);
     return Response.json(
